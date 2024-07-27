@@ -78,6 +78,9 @@ compile() {
 
     echo "Compiled ${out_file} for the Browser. Size in bytes: $( \
         wc -c "$out_file" | cut -d ' ' -f1 )"
+
+    # Copy HTML to github pages root
+    cp gol-browser.html "docs/index.html"
 }
 
 exec_() {

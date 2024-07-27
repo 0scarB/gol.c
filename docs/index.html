@@ -1,0 +1,24 @@
+<!DOCTYPE HTML>
+<html>
+<title>gol.c</title>
+<pre id="terminal"></pre>
+<script>
+window.onload = async () => {
+	var term = document.getElementById("terminal")
+	var wasmBytes = new Uint8Array([...atob(WASM_BASE64)].map(c => c.charCodeAt()))
+	var wasmExports = (await WebAssembly.instantiate(wasmBytes, {env: {
+		output(bufPtr, bufSz) {
+			var buf = new Uint8Array(wasmMem, bufPtr, bufSz)
+			term.innerHTML = [...buf].map(b => String.fromCharCode(b)).join("")
+		},
+		clearTerm() {term.innerHTML = ""},
+		updateEveryNSecs(secs) {
+			setInterval(wasmExports.update, secs*1000);
+		},
+	}})).instance.exports
+	var wasmMem = wasmExports.memory.buffer
+	wasmExports._start()
+}
+var WASM_BASE64="AGFzbQEAAAABDQNgAX0AYAAAYAJ/fwACNQMDZW52EHVwZGF0ZUV2ZXJ5TlNlY3MAAANlbnYJY2xlYXJUZXJtAAEDZW52Bm91dHB1dAACAwMCAQEEBQFwAQEBBQMBAAIGCAF/AUHQ3AQLBxwDBm1lbW9yeQIABl9zdGFydAADBnVwZGF0ZQAECpQEAmQBAn9BAC0AwNyAgABBAXNB2ARsQZDTgIAAaiEAQXchAQNAIABBAmogAUGRiICAAGotAAA6AAAgACABQY+IgIAAai8AADsAACAAQRRqIQAgAUEDaiIBDQALQ83MzD0QgICAgAALrAMBDn9BkIiAgAAhAEEALQDA3ICAACIBQQFzQdgEbCECQQAhAwNAIANBAWohBCADQX9qIQVBACEGA0AgBiIHQQFqIQYgB0F/aiEIQQAhCSAFIQogBSELA0AgAiAKQR5qQR5vQRRsaiEMIAghCiAIIQ0DQCAMIApBFGpBFG9qQZDTgIAAai0AACAJaiEJIAYgDUEBaiINwSIKTg0ACyAEIAtBAWoiC8EiCk4NAAtBASEKAkACQAJAIAkgAiADQRRsIg1qIAdqQZDTgIAAaiIMLQAAIghrQf8BcUF+ag4CAAIBCyAIQf8BcUEARyEKDAELQQAhCgsgAUHYBGwgDWogB2pBkNOAgABqIAo6AAACQEGAiICAAEGDiICAACAMLQAAGyINLQAAIgpFDQAgDUEBaiENA0AgACAKOgAAIABBAWohACANLQAAIQogDUEBaiENIAoNAAsLIAZBFEcNAAsgAEEKOgAAIABBAWohACAEIQMgBEEeRw0ACxCBgICAAEGQiICAACAAQZCIgIAAa0H//wNxEIKAgIAAQQBBAC0AwNyAgABBAXM6AMDcgIAACwsWAQBBgAgLDyMjAC4gAAABAAAAAQEBAQ=="
+</script>
+</html>
