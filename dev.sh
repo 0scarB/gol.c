@@ -11,12 +11,13 @@ compile() {
     # x86-64 Linux
     #
     out_file='gol-x86-64-bit-linux'
-    gcc -march=x86-64 -DLINUX_64_BIT \
+    gcc -ggdb -march=x86-64 -DLINUX_64_BIT \
         -Werror \
         -static \
-        -s \
         -nostartfiles -nostdlib \
+        -s \
         -fno-unwind-tables -fno-asynchronous-unwind-tables \
+        -fno-ident \
         -fno-ident \
         -Wl,-z,norelro \
         -Wl,--hash-style=sysv \
@@ -32,11 +33,12 @@ compile() {
     #
     out_file='gol-x86-32-bit-linux'
     gcc -m32 -march=i686 -DLINUX_32_BIT \
+        -ggdb \
         -Werror \
-        -Os \
         -static \
-        -s \
         -nostartfiles -nostdlib \
+        -Os \
+        -s \
         -fno-unwind-tables -fno-asynchronous-unwind-tables \
         -fno-ident \
         -Wl,-z,norelro \
@@ -54,12 +56,13 @@ compile() {
     out_file='gol-browser.html'
 
     # Compile C to WebAssembly binary
-    clang --target=wasm32 -DWEB \
+    clang --target=wasm32 -DBROWSER \
         -Werror \
+        -nostartfiles -nostdlib \
+        -Wl,--no-entry \
         -Os \
         -static \
         -s \
-        -nostartfiles -nostdlib \
         gol.c \
         -o gol-browser.wasm
 

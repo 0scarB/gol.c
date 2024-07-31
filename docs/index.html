@@ -1,24 +1,97 @@
 <!DOCTYPE HTML>
-<html>
+<html style="color:#8F8;background-color:#000;display:flex;justify-content:center">
 <title>gol.c</title>
 <pre id="terminal"></pre>
 <script>
+var SUPPORTS_TEXTDECODER = !!TextDecoder
+// `term` stores the <pre id="terminal"> DOM element. term.innerHTML is use as
+// a fake terminal
+var term
+// Only the main "loop" sets term.innerHTML. All other functions write/copy
+// to `writeBuf` to increate performance
+var writeBufSz     = 4*1024
+var writeBuf       = new Uint8Array(writeBufSz)
+var writeBufOffset = 0
+// We emulate line-buffered input. See `readInputChar` and `onkeydown` listener
+var inputCharQueue = []
+var bufferingLine  = true
+
 window.onload = async () => {
-	var term = document.getElementById("terminal")
-	var wasmBytes = new Uint8Array([...atob(WASM_BASE64)].map(c => c.charCodeAt()))
-	var wasmExports = (await WebAssembly.instantiate(wasmBytes, {env: {
+	term = document.getElementById("terminal")
+
+	// Load WASM module from a base64 string
+	var wasmBytes   = new Uint8Array([...atob(WASM_BASE64)].map(c => c.charCodeAt()))
+	var wasmExports = (await WebAssembly.instantiate(wasmBytes,{env:{
+		// Functions we call from C
 		output(bufPtr, bufSz) {
-			var buf = new Uint8Array(wasmMem, bufPtr, bufSz)
-			term.innerHTML = [...buf].map(b => String.fromCharCode(b)).join("")
+			var newWriteBufOffset = writeBufOffset + bufSz
+			// Reallocate a bigger write buffer if needed
+			while (newWriteBufOffset > writeBufSz) {
+				writeBufSz *= 2
+				newWriteBuf = new Uint8Array(writeBufSz)
+				newWriteBuf.set(writeBuf, 0, writeBufSz)
+				writeBuf = newWriteBuf
+			}
+			// Copy as directly as we can from WASM memory to the write buffer
+			writeBuf.set(new Uint8Array(wasmMem, bufPtr, bufSz), writeBufOffset)
+			writeBufOffset = newWriteBufOffset
 		},
-		clearTerm() {term.innerHTML = ""},
-		updateEveryNSecs(secs) {
-			setInterval(wasmExports.update, secs*1000);
+		clearTerm() {
+			writeBufOffset = 0
+			inputCharQueue.length = 0
 		},
+		readInputChar() {
+			if (inputCharQueue.length === 0) {
+				// Reset
+				bufferingLine = true
+				return 0
+			}
+			// Buffer until newline;
+			if (bufferingLine) return 0
+			// then return buffered characters
+			return inputCharQueue.shift().charCodeAt(0)
+		},
+
 	}})).instance.exports
 	var wasmMem = wasmExports.memory.buffer
-	wasmExports._start()
+
+	// Call the `update` C function in a main-"loop" and set term.innerHTML from
+	// the contents of `writeBuf`
+	var uf8decoder = new TextDecoder()
+	var t0 = 0;
+	(async function loop(t1) {
+		if (t1 - t0 > 0.1*1000) {
+			t0 = t1
+			wasmExports.update()
+			var subBuf = writeBuf.subarray(0, writeBufOffset)
+			term.innerHTML = SUPPORTS_TEXTDECODER
+				? uf8decoder.decode(subBuf)
+				: [...subBuf].map(b => String.fromCharCode(b)).join("")
+		}
+		requestAnimationFrame(loop);
+	})()
 }
-var WASM_BASE64="AGFzbQEAAAABDQNgAX0AYAAAYAJ/fwACNQMDZW52EHVwZGF0ZUV2ZXJ5TlNlY3MAAANlbnYJY2xlYXJUZXJtAAEDZW52Bm91dHB1dAACAwMCAQEEBQFwAQEBBQMBAAIGCAF/AUHQ3AQLBxwDBm1lbW9yeQIABl9zdGFydAADBnVwZGF0ZQAECpQEAmQBAn9BAC0AwNyAgABBAXNB2ARsQZDTgIAAaiEAQXchAQNAIABBAmogAUGRiICAAGotAAA6AAAgACABQY+IgIAAai8AADsAACAAQRRqIQAgAUEDaiIBDQALQ83MzD0QgICAgAALrAMBDn9BkIiAgAAhAEEALQDA3ICAACIBQQFzQdgEbCECQQAhAwNAIANBAWohBCADQX9qIQVBACEGA0AgBiIHQQFqIQYgB0F/aiEIQQAhCSAFIQogBSELA0AgAiAKQR5qQR5vQRRsaiEMIAghCiAIIQ0DQCAMIApBFGpBFG9qQZDTgIAAai0AACAJaiEJIAYgDUEBaiINwSIKTg0ACyAEIAtBAWoiC8EiCk4NAAtBASEKAkACQAJAIAkgAiADQRRsIg1qIAdqQZDTgIAAaiIMLQAAIghrQf8BcUF+ag4CAAIBCyAIQf8BcUEARyEKDAELQQAhCgsgAUHYBGwgDWogB2pBkNOAgABqIAo6AAACQEGAiICAAEGDiICAACAMLQAAGyINLQAAIgpFDQAgDUEBaiENA0AgACAKOgAAIABBAWohACANLQAAIQogDUEBaiENIAoNAAsLIAZBFEcNAAsgAEEKOgAAIABBAWohACAEIQMgBEEeRw0ACxCBgICAAEGQiICAACAAQZCIgIAAa0H//wNxEIKAgIAAQQBBAC0AwNyAgABBAXM6AMDcgIAACwsWAQBBgAgLDyMjAC4gAAABAAAAAQEBAQ=="
+
+window.onkeydown = (e) => {
+	var char_ = "";
+	switch (e.key) {
+		case "Backspace":
+			if (inputCharQueue.length === 0) break;
+			writeBufOffset--
+			inputCharQueue.pop()
+			break
+		case "Enter":
+			char_ = '\n'
+			bufferingLine = false
+			break
+		default:
+			if (e.key.length === 1) char_ = e.key
+	}
+	if (!char_) return
+	writeBuf[writeBufOffset++] = char_.charCodeAt(0)
+	inputCharQueue.push(char_);
+}
+
+var WASM_BASE64="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"
 </script>
 </html>
