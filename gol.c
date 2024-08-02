@@ -11,6 +11,12 @@
 #define ALIVE_TEXT "##\0"
 #define  DEAD_TEXT ". \0"
 
+#define PRESET_RANDOM 0
+#define PRESET_GLIDER 1
+#define PRESETS_N PRESET_GLIDER + 1
+static char* preset_names[] = {"Random", "Glider"};
+U16 selected_preset = 0;
+
 static const U8 GLIDER[9] = {
     0, 1, 0,
     0, 0, 1,
@@ -34,50 +40,35 @@ static UINT  max_text_buf_size;
 
 #ifdef BROWSER
     static U8 should_output_prompt = 1;
-#endif
 
-#define OLD 0
-#define NEW 1
-static U8 get_cell(U8 old_or_new, U16 x, U16 y) {
-    UINT total_offset = y*width + x;
-    U16           byte_offset = total_offset>>2;
-    U8             bit_offset = ((total_offset&3)<<1) | (is_new^old_or_new);
-    return (buf[byte_offset]>>bit_offset) & 1;
-}
-
-static void set_cell(U8 old_or_new, U16 x, U16 y, U8 value) {
-    UINT total_offset = y*width + x;
-    U16           byte_offset = total_offset>>2;
-    U8             bit_offset = ((total_offset&3)<<1) | (is_new^old_or_new);
-    if (value) {
-        buf[byte_offset] |=   1<<bit_offset;
-    } else {
-        buf[byte_offset] &= ~(1<<bit_offset);
-    }
-}
-
-#ifdef BROWSER
     __attribute__((export_name("update")))
     void update(void);
 
     __attribute__((import_name("output")))
-    void write_stdout(char* buf, UINT buf_size);
+    void output(char* buf, UINT buf_size);
 
     __attribute__((import_name("clearTerm")))
     void clear_terminal(void);
 
     __attribute__((import_name("readInputChar")))
     char read_stdin_char(void);
+
+    __attribute__((import_name("setUpdateInterval")))
+    void set_update_interval(float interval);
+
+    __attribute__((import_name("random")))
+    float random(void);
+
+    static void fill_random(char* buf, unsigned long count) {
+        while (--count)
+            buf[count] = (char) (256*random());
+    }
 #else
+    unsigned long update_interval[2] = {0, 0};
+
     static void update(void);
 
     void _start(void) {
-        float secs = 0.1;
-
-        unsigned long whole_secs = secs/1;
-        unsigned long nonosecs   = (secs - (float) whole_secs)*1e9;
-        unsigned long fake_timespec[2] = {whole_secs, nonosecs};
-
         while (1) {
             update();
             #ifdef LINUX_64_BIT
@@ -85,7 +76,7 @@ static void set_cell(U8 old_or_new, U16 x, U16 y, U8 value) {
                 asm volatile(
                     "syscall"
                     : "=a"(dummy_ret)
-                    : "a"(35), "D"(fake_timespec), "S"(0)
+                    : "a"(35), "D"(update_interval), "S"(0)
                     : "memory");
             #endif
             #ifdef LINUX_32_BIT
@@ -93,13 +84,13 @@ static void set_cell(U8 old_or_new, U16 x, U16 y, U8 value) {
                 asm volatile(
                     "int $0x80"
                     : "=a"(dummy_ret)
-                    : "a"(0xa2), "b"(fake_timespec), "c"(0)
+                    : "a"(0xa2), "b"(update_interval), "c"(0)
                     : "memory");
             #endif
         }
     }
 
-    static void write_stdout(char* buf, UINT buf_size) {
+    static void output(char* buf, UINT buf_size) {
         #ifdef LINUX_64_BIT
             int dummy_ret;
             asm volatile(
@@ -137,7 +128,49 @@ static void set_cell(U8 old_or_new, U16 x, U16 y, U8 value) {
         #endif
         return read_stdin_buf[0];
     }
+
+    static void fill_random(char* buf, unsigned long count) {
+        U8 dummy_ret;
+        asm volatile(
+            "int $0x80"
+            : "=a"(dummy_ret)
+            : "a"(0x163), "b"(buf), "c"(count), "d"(0)
+            : "memory");
+    }
+
+    static void set_update_interval(float secs) {
+        unsigned long whole_secs = secs/1;
+        unsigned long nonosecs   = (secs - (float) whole_secs)*1e9;
+        update_interval[0] = whole_secs;
+        update_interval[1] = nonosecs;
+    }
 #endif
+
+static void output_str(char* str) {
+    U16 len = 0;
+    while (str[len++] != '\0');
+    output(str, len);
+}
+
+#define OLD 0
+#define NEW 1
+static U8 get_cell(U8 old_or_new, U16 x, U16 y) {
+    UINT total_offset = y*width + x;
+    U16           byte_offset = total_offset>>2;
+    U8             bit_offset = ((total_offset&3)<<1) | (is_new^old_or_new);
+    return (buf[byte_offset]>>bit_offset) & 1;
+}
+
+static void set_cell(U8 old_or_new, U16 x, U16 y, U8 value) {
+    UINT total_offset = y*width + x;
+    U16           byte_offset = total_offset>>2;
+    U8             bit_offset = ((total_offset&3)<<1) | (is_new^old_or_new);
+    if (value) {
+        buf[byte_offset] |=   1<<bit_offset;
+    } else {
+        buf[byte_offset] &= ~(1<<bit_offset);
+    }
+}
 
 static U8 prompt_uint_input(char* prompt, U16* result) {
     if (*result > 0) return 0;
@@ -147,9 +180,7 @@ static U8 prompt_uint_input(char* prompt, U16* result) {
         && should_output_prompt
     #endif
     ) {
-        U8 prompt_len = 0;
-        while (prompt[prompt_len++] != '\0');
-        write_stdout(prompt, prompt_len);
+        output_str(prompt);
         #ifdef BROWSER
             should_output_prompt = 0;
         #endif
@@ -163,7 +194,7 @@ static U8 prompt_uint_input(char* prompt, U16* result) {
     #endif
     if (c == '\n') {
         if (uint_input == 0) {
-            write_stdout("Number cannot be 0. Please try again!\n", 38);
+            output("Number cannot be 0. Please try again!\n", 38);
             #ifdef BROWSER
                 should_output_prompt = 1;
             #endif
@@ -178,7 +209,7 @@ static U8 prompt_uint_input(char* prompt, U16* result) {
         return 0;
     } else {
         if (c < '0' || c > '9') {
-            write_stdout("Invalid positive whole number. Please try again!\n", 49);
+            output("Invalid positive whole number. Please try again!\n", 49);
             // Input is line-buffered
             // -> we read until the end of the line to fully clear the
             //    invalid input from the read buffer.
@@ -213,7 +244,7 @@ void update(void) {
         mem_offset += (width*height>>2) + 4;
 
         if (mem_offset >= MAX_WORKING_MEM - MIN_TEXT_BUF_SIZE) {
-            write_stdout("Grid too large. Please try again!\n", 34);
+            output_str("Grid too large. Please try again!\n");
             width  = 0;
             height = 0;
             return;
@@ -222,13 +253,41 @@ void update(void) {
         text_buf = (void*) mem_region + mem_offset;
         max_text_buf_size = ((MAX_WORKING_MEM - mem_offset)>>10)<<10;
 
-        for (U16 y = 0; y < 3; ++y)
-            for (U16 x = 0; x < 3; ++x)
-                set_cell(OLD, x, y, GLIDER[y*3 + x]);
+        #ifdef BROWSER
+        if (should_output_prompt) {
+        #endif
+            output_str("Choose a preset:");
+            for (U8 i = 0; i < PRESETS_N; ++i) {
+                char line_start[4] = "\n : ";
+                line_start[1] = i + '1';
+                output(line_start, 3);
+                output_str(preset_names[i]);
+            }
+        #ifdef BROWSER
+        }
+        #endif
+        if (prompt_uint_input("\nChoice: ", &selected_preset)) return;
+        switch (selected_preset - 1) {
+            case PRESET_GLIDER:
+                for (U16 y = 0; y < 3; ++y)
+                    for (U16 x = 0; x < 3; ++x)
+                        set_cell(OLD, x, y, GLIDER[y*3 + x]);
+                break;
+            case PRESET_RANDOM:
+                fill_random((char*) buf, width*height>>2);
+                break;
+            default:
+                output_str("Invalid choice. Please try again!\n");
+                selected_preset = 0;
+                return;
+        }
 
         #ifndef BROWSER
-            write_stdout(ERASE_SCREEN MOVE_CURSOR_0_0, 7);
+            output(ERASE_SCREEN MOVE_CURSOR_0_0, 7);
         #endif
+
+        set_update_interval(0.1);
+
         setup = 1;
     }
 
@@ -260,7 +319,7 @@ void update(void) {
                 *text_ptr++ = *cell_text++;
 
             if (text_ptr - text_buf > max_text_buf_size) {
-                write_stdout(text_buf, text_ptr - text_buf);
+                output(text_buf, text_ptr - text_buf);
                 text_ptr = text_buf;
             }
         }
@@ -271,9 +330,9 @@ void update(void) {
         #endif
         *text_ptr++ = '\n';
     }
-    write_stdout(text_buf, text_ptr - text_buf);
+    output(text_buf, text_ptr - text_buf);
     #ifndef BROWSER
-        write_stdout(ERASE_TIL_END_OF_SCREEN MOVE_CURSOR_0_0, 7);
+        output(ERASE_TIL_END_OF_SCREEN MOVE_CURSOR_0_0, 7);
     #endif
 
     is_new ^= 1;

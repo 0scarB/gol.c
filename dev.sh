@@ -15,9 +15,9 @@ compile() {
         -Werror \
         -static \
         -s \
+        -nostartfiles -nostdlib \
         -fno-unwind-tables -fno-asynchronous-unwind-tables \
         -fno-ident \
-        -nostartfiles -nostdlib \
         -fno-stack-protector \
         -z execstack \
         -c gol.c \
