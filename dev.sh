@@ -11,29 +11,36 @@ compile() {
     # x86-64 Linux
     #
     out_file='gol-x86-64-bit-linux'
-    gcc -ggdb -march=x86-64 -DLINUX_64_BIT \
+    gcc -march=x86-64 -DLINUX_64_BIT \
         -Werror \
         -static \
-        -nostartfiles -nostdlib \
         -s \
         -fno-unwind-tables -fno-asynchronous-unwind-tables \
         -fno-ident \
-        -fno-ident \
-        -Wl,-z,norelro \
-        -Wl,--hash-style=sysv \
-        -Wl,--build-id=none \
-        gol.c \
+        -nostartfiles -nostdlib \
+        -fno-stack-protector \
+        -z execstack \
+        -c gol.c \
+        -o "$out_file.o"
+    strip --strip-debug --remove-section=.note.gnu.property "$out_file.o"
+    ld \
+        --strip-all \
+        --nmagic \
+        --hash-style=sysv \
+        --build-id=none \
+        -z execstack \
+        "$out_file.o" \
         -o "$out_file"
-    strip --remove-section=.note.gnu.property "$out_file"
+
     echo "Compiled ${out_file} for x86, 64-bit, Linux. Size in bytes: $( \
         wc -c "$out_file" | cut -d ' ' -f1 )"
+    rm "$out_file.o"
 
     #
     # x86 32-bit Linux
     #
     out_file='gol-x86-32-bit-linux'
-    gcc -m32 -march=i686 -DLINUX_32_BIT \
-        -ggdb \
+    gcc -m32 -march=i386 -DLINUX_32_BIT \
         -Werror \
         -static \
         -nostartfiles -nostdlib \
@@ -41,43 +48,77 @@ compile() {
         -s \
         -fno-unwind-tables -fno-asynchronous-unwind-tables \
         -fno-ident \
-        -Wl,-z,norelro \
-        -Wl,--hash-style=sysv \
-        -Wl,--build-id=none \
-        gol.c \
+        -fno-plt -fno-pic \
+        -z execstack \
+        -c gol.c \
+        -o "$out_file.o"
+    ld -m elf_i386 \
+        --strip-all \
+        --nmagic \
+        --hash-style=sysv \
+        --build-id=none \
+        -z execstack \
+        "$out_file.o" \
         -o "$out_file"
-    strip --remove-section=.note.gnu.property --remove-section=.got.plt "$out_file"
     echo "Compiled ${out_file} for x86, 32-bit, Linux. Size in bytes: $( \
         wc -c "$out_file" | cut -d ' ' -f1 )"
+    rm "$out_file.o"
 
     #
     # Web = WebAssembly + HTML
     #
-    out_file='gol-browser.html'
+    out_file='gol-browser.wasm'
 
     # Compile C to WebAssembly binary
     clang --target=wasm32 -DBROWSER \
         -Werror \
         -nostartfiles -nostdlib \
         -Wl,--no-entry \
-        -Os \
+        -Wl,--compress-relocations \
+        -Oz \
         -static \
         -s \
         gol.c \
         -o gol-browser.wasm
 
-    # Embed WebAssembly as base64-encoded string in the HTML file
-    embed_line_no="$(                               \
-        grep --line-number WASM_BASE64 gol-browser.html \
-        | cut -d ':' -f1                            \
-        | tail --lines 1                            )"
-    head -n "$(( $embed_line_no - 1 ))" gol-browser.html              > gol-browser-new.html
-    echo "var WASM_BASE64=\"$( base64 --wrap 0 gol-browser.wasm )\"" >> gol-browser-new.html
-    tail   +"$(( $embed_line_no + 1 ))" gol-browser.html             >> gol-browser-new.html
-    mv gol-browser-new.html "$out_file"
+    wasm-opt -Oz gol-browser.wasm -o gol-browser.wasm
 
-    # Remove WebAssembly binary
-    rm gol-browser.wasm
+    # Embed WebAssembly as base64-encoded string in the JavaScript file
+    out_file='gol-browser.js'
+    embed_line_no="$(                              \
+        grep --line-number WASM_BASE64 "$out_file" \
+        | cut -d ':' -f1                           \
+        | tail --lines 1                           )"
+    head -n "$(( $embed_line_no - 1 ))" "$out_file"                   > "$out_file.new"
+    echo "var WASM_BASE64=\"$( base64 --wrap 0 gol-browser.wasm )\"" >> "$out_file.new"
+    tail   +"$(( $embed_line_no + 1 ))" "$out_file"                  >> "$out_file.new"
+    mv "$out_file.new" "$out_file"
+
+    # Minify JavaScript
+    terser \
+        --compress passes=3,ecma=2015,hoist_vars=true,booleans_as_integers=true \
+        --mangle toplevel=true \
+        'gol-browser.js' \
+        -o 'gol-browser.min.js'
+
+    # Embed JavaScript in HTML
+    out_file='gol-browser.html'
+    embed_line_start="$(( $(                      \
+        grep --line-number '<script>' "$out_file" \
+        | cut -d ':' -f1                          \
+        | tail --lines 1                          ) + 1 ))"
+    embed_line_end="$(( $(                         \
+        grep --line-number '</script>' "$out_file" \
+        | cut -d ':' -f1                          \
+        | tail --lines 1                          ) + 1 ))"
+    head -n "$(( $embed_line_start - 1 ))" "$out_file"  > "$out_file.new"
+    cat 'gol-browser.min.js'                           >> "$out_file.new"
+    echo ''                                            >> "$out_file.new"
+    tail   +"$(( $embed_line_end   - 1 ))" "$out_file" >> "$out_file.new"
+    mv "$out_file.new" "$out_file"
+
+    # Remove intermediate files
+    rm gol-browser.wasm gol-browser.min.js
 
     echo "Compiled ${out_file} for the Browser. Size in bytes: $( \
         wc -c "$out_file" | cut -d ' ' -f1 )"

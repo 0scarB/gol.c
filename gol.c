@@ -278,4 +278,3 @@ void update(void) {
 
     is_new ^= 1;
 }
-
