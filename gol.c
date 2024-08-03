@@ -78,7 +78,6 @@ static UINT  max_text_buf_size;
         #define SYSCALL_NO_WRITE          4
         #define SYSCALL_NO_SLEEP_NANO  0xa2
         #define SYSCALL_NO_GET_RANDOM 0x163
-
     #endif
 
     ULONG update_interval[2] = {0, 0};
@@ -125,15 +124,15 @@ static void output_str(char* str) {
 #define NEW 1
 static U8 get_cell(U8 old_or_new, U16 x, U16 y) {
     UINT total_offset = y*width + x;
-    U16           byte_offset = total_offset>>2;
-    U8             bit_offset = ((total_offset&3)<<1) | (is_new^old_or_new);
+    U16   byte_offset = total_offset>>2;
+    U8     bit_offset = ((total_offset&3)<<1) | (is_new^old_or_new);
     return (buf[byte_offset]>>bit_offset) & 1;
 }
 
 static void set_cell(U8 old_or_new, U16 x, U16 y, U8 value) {
     UINT total_offset = y*width + x;
-    U16           byte_offset = total_offset>>2;
-    U8             bit_offset = ((total_offset&3)<<1) | (is_new^old_or_new);
+    U16   byte_offset = total_offset>>2;
+    U8     bit_offset = ((total_offset&3)<<1) | (is_new^old_or_new);
     if (value) {
         buf[byte_offset] |=   1<<bit_offset;
     } else {
@@ -141,7 +140,7 @@ static void set_cell(U8 old_or_new, U16 x, U16 y, U8 value) {
     }
 }
 
-#ifndef WEB
+#ifndef BROWSER
 #pragma GCC push_options
 #pragma GCC optimize ("O0")
 #endif
@@ -199,7 +198,7 @@ static U8 prompt_uint_input(char* prompt, U16* result) {
         return 1;
     }
 }
-#ifndef WEB
+#ifndef BROWSER
 #pragma GCC pop_options
 #endif
 
