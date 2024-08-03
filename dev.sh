@@ -7,15 +7,19 @@ EXEC=2
 DEV=$(( COMPILE | EXEC ))
 
 compile() {
+    as --64 -gdwarf-5 gol-linux-asm-64bit.s -o gol-linux-asm-64bit.o
+    as --32 -gdwarf-5 gol-linux-asm-32bit.s -o gol-linux-asm-32bit.o
+
     #
     # x86-64 Linux
     #
     out_file='gol-x86-64-bit-linux'
     gcc -march=x86-64 -DLINUX_64_BIT \
-        -Werror \
+        -Werror --std=c99 -pedantic \
         -static \
-        -s \
         -nostartfiles -nostdlib \
+        -Os \
+        -s \
         -fno-unwind-tables -fno-asynchronous-unwind-tables \
         -fno-ident \
         -fno-stack-protector \
@@ -29,26 +33,25 @@ compile() {
         --hash-style=sysv \
         --build-id=none \
         -z execstack \
-        "$out_file.o" \
+        gol-linux-asm-64bit.o "$out_file.o" \
         -o "$out_file"
 
     echo "Compiled ${out_file} for x86, 64-bit, Linux. Size in bytes: $( \
         wc -c "$out_file" | cut -d ' ' -f1 )"
-    rm "$out_file.o"
 
     #
     # x86 32-bit Linux
     #
     out_file='gol-x86-32-bit-linux'
     gcc -m32 -march=i386 -DLINUX_32_BIT \
-        -Werror \
+        -Werror --std=c99 -pedantic \
         -static \
-        -nostartfiles -nostdlib \
         -Os \
         -s \
         -fno-unwind-tables -fno-asynchronous-unwind-tables \
         -fno-ident \
         -fno-plt -fno-pic \
+        -nostartfiles -nostdlib \
         -z execstack \
         -c gol.c \
         -o "$out_file.o"
@@ -58,11 +61,14 @@ compile() {
         --hash-style=sysv \
         --build-id=none \
         -z execstack \
-        "$out_file.o" \
+        "$out_file.o" gol-linux-asm-32bit.o \
         -o "$out_file"
     echo "Compiled ${out_file} for x86, 32-bit, Linux. Size in bytes: $( \
         wc -c "$out_file" | cut -d ' ' -f1 )"
     rm "$out_file.o"
+
+    # Remove object files
+    rm *.o
 
     #
     # Web = WebAssembly + HTML

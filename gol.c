@@ -1,7 +1,8 @@
-#define U8   unsigned char
-#define U16  unsigned short
-#define I16    signed short
-#define UINT unsigned int
+#define U8    unsigned char
+#define U16   unsigned short
+#define I16     signed short
+#define UINT  unsigned int
+#define ULONG unsigned long
 
 #define ERASE_SCREEN            "\033[2J"
 #define ERASE_TIL_END_OF_SCREEN "\033[0J"
@@ -29,10 +30,10 @@ static U16 height = 0;
 static U8  is_new = 0;
 static U16 uint_input;
 
-#define MAX_WORKING_MEM 48*1024
+#define MAX_WORKING_MEM     48*1024
 static U8    mem_region[MAX_WORKING_MEM] = {0};
 static U8*   buf;
-#define READ_STDIN_BUF_SIZE 1024
+#define READ_STDIN_BUF_SIZE    1024
 static char* read_stdin_buf;
 static char* text_buf;
 #define      MIN_TEXT_BUF_SIZE 1024
@@ -59,88 +60,56 @@ static UINT  max_text_buf_size;
     __attribute__((import_name("random")))
     float random(void);
 
-    static void fill_random(char* buf, unsigned long count) {
+    static void fill_random(char* buf, ULONG count) {
         while (--count)
             buf[count] = (char) (256*random());
     }
 #else
-    unsigned long update_interval[2] = {0, 0};
+    #define SYSCALL_32_AND_64BIT 0
+    #define SYSCALL_32BIT_ONLY   1
+    #ifdef LINUX_64_BIT
+        #define SYSCALL_NO_READ          0
+        #define SYSCALL_NO_WRITE         1
+        #define SYSCALL_NO_SLEEP_NANO   35
+        #define SYSCALL_NO_GET_RANDOM  318
+
+    #else
+        #define SYSCALL_NO_READ           3
+        #define SYSCALL_NO_WRITE          4
+        #define SYSCALL_NO_SLEEP_NANO  0xa2
+        #define SYSCALL_NO_GET_RANDOM 0x163
+
+    #endif
+
+    ULONG update_interval[2] = {0, 0};
+
+    void syscall(ULONG syscall_no, ULONG arg1, ULONG arg2, ULONG arg3);
 
     static void update(void);
 
     void _start(void) {
         while (1) {
             update();
-            #ifdef LINUX_64_BIT
-                int dummy_ret;
-                asm volatile(
-                    "syscall"
-                    : "=a"(dummy_ret)
-                    : "a"(35), "D"(update_interval), "S"(0)
-                    : "memory");
-            #endif
-            #ifdef LINUX_32_BIT
-                int dummy_ret;
-                asm volatile(
-                    "int $0x80"
-                    : "=a"(dummy_ret)
-                    : "a"(0xa2), "b"(update_interval), "c"(0)
-                    : "memory");
-            #endif
+            syscall(SYSCALL_NO_SLEEP_NANO, (ULONG) update_interval, 0, 0);
         }
     }
 
-    static void output(char* buf, UINT buf_size) {
-        #ifdef LINUX_64_BIT
-            int dummy_ret;
-            asm volatile(
-                "syscall"
-                : "=a"(dummy_ret)
-                : "a"(1), "D"(1), "S"(buf), "d"(buf_size)
-                : "memory");
-        #endif
-        #ifdef LINUX_32_BIT
-            int dummy_ret;
-            asm volatile(
-                "int $0x80"
-                : "=a"(dummy_ret)
-                : "a"(0x04), "b"(1), "c"(buf), "d"(buf_size)
-                : "memory");
-        #endif
+    static void output(char* buf, ULONG buf_size) {
+        syscall(SYSCALL_NO_WRITE, 0, (ULONG) buf, buf_size);
     }
 
     static char read_stdin_char(void) {
-        #ifdef LINUX_64_BIT
-            U8 dummy_ret;
-            asm volatile(
-                "syscall"
-                : "=a"(dummy_ret)
-                : "a"(0), "D"(0), "S"(read_stdin_buf), "d"(1)
-                : "memory");
-        #endif
-        #ifdef LINUX_32_BIT
-            U8 dummy_ret;
-            asm volatile(
-                "int $0x80"
-                : "=a"(dummy_ret)
-                : "a"(0x03), "b"(0), "c"(read_stdin_buf), "d"(1)
-                : "memory");
-        #endif
+        syscall(SYSCALL_NO_READ, 0, (ULONG) read_stdin_buf, 1);
         return read_stdin_buf[0];
     }
 
-    static void fill_random(char* buf, unsigned long count) {
-        U8 dummy_ret;
-        asm volatile(
-            "int $0x80"
-            : "=a"(dummy_ret)
-            : "a"(0x163), "b"(buf), "c"(count), "d"(0)
-            : "memory");
+    static void fill_random(char* buf, ULONG count) {
+        syscall(SYSCALL_NO_GET_RANDOM, (ULONG) buf, count, 0);
     }
 
     static void set_update_interval(float secs) {
-        unsigned long whole_secs = secs/1;
-        unsigned long nonosecs   = (secs - (float) whole_secs)*1e9;
+        ULONG whole_secs = secs/1;
+        ULONG nonosecs   = (secs - (float) whole_secs)*1e9;
         update_interval[0] = whole_secs;
         update_interval[1] = nonosecs;
     }
@@ -172,6 +141,10 @@ static void set_cell(U8 old_or_new, U16 x, U16 y, U8 value) {
     }
 }
 
+#ifndef WEB
+#pragma GCC push_options
+#pragma GCC optimize ("O0")
+#endif
 static U8 prompt_uint_input(char* prompt, U16* result) {
     if (*result > 0) return 0;
 
@@ -226,6 +199,9 @@ static U8 prompt_uint_input(char* prompt, U16* result) {
         return 1;
     }
 }
+#ifndef WEB
+#pragma GCC pop_options
+#endif
 
 void update(void) {
     //
@@ -234,13 +210,13 @@ void update(void) {
     if (!setup) {
         U16 mem_offset = 0;
 
-        read_stdin_buf = (void*) mem_region + mem_offset;
+        read_stdin_buf = (char*) mem_region + mem_offset;
         mem_offset += READ_STDIN_BUF_SIZE;
 
         if (prompt_uint_input("Game  width: ", &width )) return;
         if (prompt_uint_input("Game height: ", &height)) return;
 
-        buf = (void*) mem_region + mem_offset;
+        buf = (U8*) mem_region + mem_offset;
         mem_offset += (width*height>>2) + 4;
 
         if (mem_offset >= MAX_WORKING_MEM - MIN_TEXT_BUF_SIZE) {
@@ -250,7 +226,7 @@ void update(void) {
             return;
         };
 
-        text_buf = (void*) mem_region + mem_offset;
+        text_buf = (char*) mem_region + mem_offset;
         max_text_buf_size = ((MAX_WORKING_MEM - mem_offset)>>10)<<10;
 
         #ifdef BROWSER
